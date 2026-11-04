@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>VunnD Blok</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    background: #1e1b4b;
+    color: #e0e7ff;
+    font-family: Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 10px;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  h1 { font-size: 20px; color: #fbbf24; margin-bottom: 6px; }
+  .info { display: flex; gap: 24px; font-size: 16px; margin-bottom: 6px; }
+  .info b { color: #fbbf24; }
+  canvas {
+    width: min(94vw, 400px);
+    height: auto;
+    aspect-ratio: 400 / 620;
+    background: #312e81;
+    border-radius: 12px;
+    touch-action: none;
+  }
+  #pesan { height: 22px; margin-top: 6px; color: #34d399; font-weight: bold; }
+  button {
+    margin-top: 6px;
+    padding: 10px 22px;
+    font-size: 16px;
+    font-weight: bold;
+    border: none;
+    border-radius: 8px;
+    background: #fbbf24;
+    color: #000;
+  }
+</style>
+</head>
+<body>
+
+<h1>🧩 VunnD Blok</h1>
+<div class="inpo">
+  <div>Skor lu: <b id="skor">0</b></div>
+  <div>Rekor lu cuma segini??: <b id="rekor">0</b></div>
+</div>
+
+<canvas id="c" width="400" height="620"></canvas>
+<div id="pesan"></div>
+<button id="btnUlang">Ulang dongg!!</button>
+
+<script>
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+  const skorEl = document.getElementById("skor");
+  const rekorEl = document.getElementById("rekor");
+  const pesanEl = document.getElementById("pesan");
+
+  const N = 8;          // papan 8x8
+  const CELL = 44;      // ukuran kotak di papan
+  const BX = 24;        // posisi papan (x)
+  const BY = 16;        // posisi papan (y)
+  const TRAY_Y = 400;   // mulai area blok di bawah
+  const TC = 24;        // ukuran kotak di area blok bawah
+  const OFFSET_JARI = 90; // blok diangkat di atas jari biar kelihatan
+
+  const WARNA = ["", "#f87171", "#fb923c", "#facc15", "#4ade80", "#22d3ee", "#a78bfa", "#f472b6"];
+
+  const BENTUK = [
+    [[1]],
+    [[1,1]], [[1],[1]],
+    [[1,1,1]], [[1],[1],[1]],
+    [[1,1,1,1]], [[1],[1],[1],[1]],
+    [[1,1,1,1,1]], [[1],[1],[1],[1],[1]],
+    [[1,1],[1,1]],
+    [[1,1,1],[1,1,1],[1,1,1]],
+    [[1,0],[1,1]], [[0,1],[1,1]], [[1,1],[1,0]], [[1,1],[0,1]],
+    [[1,0],[1,0],[1,1]], [[0,1],[0,1],[1,1]], [[1,1],[1,0],[1,0]], [[1,1],[0,1],[0,1]],
+    [[1,1,1],[1,0,0],[1,0,0]], [[1,1,1],[0,0,1],[0,0,1]],
+    [[1,1,0],[0,1,1]], [[0,1,1],[1,1,0]],
+    [[1,0],[1,1],[0,1]], [[0,1],[1,1],[1,0]],
+    [[1,1,1],[0,1,0]], [[0,1,0],[1,1,1]],
+    [[1,0],[1,1],[1,0]], [[0,1],[1,1],[0,1]]
+  ];
+
+  let grid, bidak, skor, rekor, drag, selesai, timerPesan;
+
+  rekor = Number(localStorage.getItem("rekorBlok")) || 0;
+  rekorEl.textContent = rekor;
+
+  function bentukAcak() {
+    const b = BENTUK[Math.floor(Math.random() * BENTUK.length)];
+    const w = Math.floor(Math.random() * 7) + 1;
+    return { m: b, w: w };
+  }
+
+  function bagiBaru() {
+    bidak = [bentukAcak(), bentukAcak(), bentukAcak()];
+  }
+
+  function mulai() {
+    grid = Array.from({ length: N }, () => Array(N).fill(0));
+    skor = 0;
+    drag = null;
+    selesai = false;
+    skorEl.textContent = 0;
+    pesanEl.textContent = "";
+    bagiBaru();
+    gambar();
+  }
+
+  function muat(m, gx, gy) {
+    for (let r = 0; r < m.length; r++) {
+      for (let c = 0; c < m[0].length; c++) {
+        if (!m[r][c]) continue;
+        const y = gy + r, x = gx + c;
+        if (x < 0 || y < 0 || x >= N || y >= N) return false;
+        if (grid[y][x]) return false;
+      }
+    }
+    return true;
+  }
+
+  function adaTempat(m) {
+    for (let y = 0; y < N; y++)
+      for (let x = 0; x < N; x++)
+        if (muat(m, x, y)) return true;
+    return false;
+  }
+
+  function tampilPesan(teks) {
+    pesanEl.textContent = teks;
+    clearTimeout(timerPesan);
+    timerPesan = setTimeout(() => { if (!selesai) pesanEl.textContent = ""; }, 1200);
+  }
+
+  function tempatkan(b, gx, gy) {
+    let jumlah = 0;
+    for (let r = 0; r < b.m.length; r++)
+      for (let c = 0; c < b.m[0].length; c++)
+        if (b.m[r][c]) { grid[gy + r][gx + c] = b.w; jumlah++; }
+    skor += jumlah;
+
+    // cari baris & kolom penuh
+    const baris = [], kolom = [];
+    for (let i = 0; i < N; i++) {
+      if (grid[i].every(v => v)) baris.push(i);
+      if (grid.every(row => row[i])) kolom.push(i);
+    }
+    baris.forEach(r => { for (let x = 0; x < N; x++) grid[r][x] = 0; });
+    kolom.forEach(c => { for (let y = 0; y < N; y++) grid[y][c] = 0; });
+
+    const garis = baris.length + kolom.length;
+    if (garis > 0) {
+      skor += garis * garis * 10;
+      tampilPesan(garis === 1 ? "Bersih! +10" : "Combo x" + garis + "! +" + (garis * garis * 10));
+    }
+    skorEl.textContent = skor;
+    if (skor > rekor) {
+      rekor = skor;
+      rekorEl.textContent = rekor;
+      localStorage.setItem("rekorBlok", rekor);
+    }
+  }
+
+  function cekGameOver() {
+    const sisa = bidak.filter(b => b);
+    if (sisa.length === 0) return;
+    if (!sisa.some(b => adaTempat(b.m))) {
+      selesai = true;
+      pesanEl.textContent = "Game over! Skor: " + skor;
+    }
+  }
+
+  // ---------- gambar ----------
+  function kotak(x, y, s, warna, alpha) {
+    ctx.globalAlpha = alpha || 1;
+    ctx.fillStyle = warna;
+    ctx.beginPath();
+    ctx.roundRect(x + 1, y + 1, s - 2, s - 2, 5);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.25)";
+    ctx.beginPath();
+    ctx.roundRect(x + 3, y + 3, s - 6, (s - 6) / 3, 3);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  function posisiDrop() {
+    const b = bidak[drag.i];
+    const w = b.m[0].length * CELL, h = b.m.length * CELL;
+    const tlx = drag.x - w / 2;
+    const tly = drag.y - h / 2 - OFFSET_JARI;
+    return {
+      tlx, tly,
+      gx: Math.round((tlx - BX) / CELL),
+      gy: Math.round((tly - BY) / CELL)
+    };
+  }
+
+  function gambar() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // papan
+    ctx.fillStyle = "#1e1b4b";
+    ctx.beginPath();
+    ctx.roundRect(BX - 6, BY - 6, N * CELL + 12, N * CELL + 12, 10);
+    ctx.fill();
+    for (let y = 0; y < N; y++) {
+      for (let x = 0; x < N; x++) {
+        if (grid[y][x]) kotak(BX + x * CELL, BY + y * CELL, CELL, WARNA[grid[y][x]]);
+        else {
+          ctx.fillStyle = "#312e81";
+          ctx.beginPath();
+          ctx.roundRect(BX + x * CELL + 1, BY + y * CELL + 1, CELL - 2, CELL - 2, 5);
+          ctx.fill();
+        }
+      }
+    }
+
+    // bayangan tempat jatuh
+    if (drag) {
+      const b = bidak[drag.i];
+      const p = posisiDrop();
+      if (muat(b.m, p.gx, p.gy)) {
+        for (let r = 0; r < b.m.length; r++)
+          for (let c = 0; c < b.m[0].length; c++)
+            if (b.m[r][c]) kotak(BX + (p.gx + c) * CELL, BY + (p.gy + r) * CELL, CELL, WARNA[b.w], 0.35);
+      }
+    }
+
+    // area blok di bawah
+    ctx.fillStyle = "rgba(0,0,0,0.2)";
+    ctx.beginPath();
+    ctx.roundRect(10, TRAY_Y - 10, 380, 200, 12);
+    ctx.fill();
+
+    bidak.forEach((b, i) => {
+      if (!b) return;
+      if (drag && drag.i === i) return;
+      const cx = 400 / 6 * (2 * i + 1);
+      const cy = TRAY_Y + 90;
+      const w = b.m[0].length * TC, h = b.m.length * TC;
+      for (let r = 0; r < b.m.length; r++)
+        for (let c = 0; c < b.m[0].length; c++)
+          if (b.m[r][c]) kotak(cx - w / 2 + c * TC, cy - h / 2 + r * TC, TC, WARNA[b.w]);
+    });
+
+    // blok yang lagi diseret
+    if (drag) {
+      const b = bidak[drag.i];
+      const p = posisiDrop();
+      for (let r = 0; r < b.m.length; r++)
+        for (let c = 0; c < b.m[0].length; c++)
+          if (b.m[r][c]) kotak(p.tlx + c * CELL, p.tly + r * CELL, CELL, WARNA[b.w]);
+    }
+
+    if (selesai) {
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 36px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText("CUPU BET JIRR", 200, 260);
+      ctx.font = "22px Arial";
+      ctx.fillText("Skor: " + skor, 200, 300);
+      ctx.fillText("Teken Ulang sana!!", 200, 340);
+    }
+  }
+
+  // ---------- input ----------
+  function titik(e) {
+    const r = canvas.getBoundingClientRect();
+    return {
+      x: (e.clientX - r.left) * canvas.width / r.width,
+      y: (e.clientY - r.top) * canvas.height / r.height
+    };
+  }
+
+  canvas.addEventListener("pointerdown", e => {
+    if (selesai) return;
+    const t = titik(e);
+    if (t.y < TRAY_Y - 10) return;
+    const i = Math.floor(t.x / (400 / 3));
+    if (i < 0 || i > 2 || !bidak[i]) return;
+    drag = { i: i, x: t.x, y: t.y };
+    canvas.setPointerCapture(e.pointerId);
+    gambar();
+  });
+
+  canvas.addEventListener("pointermove", e => {
+    if (!drag) return;
+    const t = titik(e);
+    drag.x = t.x;
+    drag.y = t.y;
+    gambar();
+  });
+
+  function lepas() {
+    if (!drag) return;
+    const b = bidak[drag.i];
+    const p = posisiDrop();
+    if (muat(b.m, p.gx, p.gy)) {
+      tempatkan(b, p.gx, p.gy);
+      bidak[drag.i] = null;
+      if (bidak.every(x => !x)) bagiBaru();
+      drag = null;
+      cekGameOver();
+    } else {
+      drag = null;
+    }
+    gambar();
+  }
+
+  canvas.addEventListener("pointerup", lepas);
+  canvas.addEventListener("pointercancel", () => { drag = null; gambar(); });
+
+  document.getElementById("btnUlang").addEventListener("click", mulai);
+
+  mulai();
+</script>
+</body>
+</html>
